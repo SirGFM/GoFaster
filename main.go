@@ -5,12 +5,14 @@ import (
     "encoding/json"
     "flag"
     "fmt"
+    "io/ioutil"
     "net"
     "net/http"
     "os"
     "os/signal"
     "path/filepath"
     "strings"
+    "time"
 )
 
 type Context struct {
@@ -43,7 +45,90 @@ type GameSplit struct {
     Best []SplitEntry `json:"best",omitempty`
 }
 
-func saveData(path string, res *http.Response) {
+func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
+    var newSplit GameSplit
+    var bestSplit GameSplit
+
+    // Open the best time, for comparison
+    bestFp, err := os.OpenFile(bestPath, os.O_RDWR, 0644)
+    if err != nil {
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed to open split '%s': %+v", bestSplit, err)
+        return
+    }
+    defer bestFp.Close()
+
+    data, err := ioutil.ReadAll(bestFp)
+    if err == nil {
+        err = json.Unmarshal(data, &bestSplit)
+    }
+    if err != nil {
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed load split '%s': %+v", bestPath, err)
+        fmt.Printf("Data: %+v", data)
+        return
+    }
+
+    // Retrieve the latest time
+    data, err = ioutil.ReadAll(req.Body)
+    if err != nil {
+        // TODO Failed to read body
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed to get new data for '%s'", newPath, err)
+        fmt.Printf("Data: %+v", data)
+        return
+    }
+
+    err = json.Unmarshal(data, &newSplit)
+    if err != nil {
+        // TODO Bad data
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed load split '%s': %+v", bestPath, err)
+        return
+    }
+
+    err = ioutil.WriteFile(newPath, data, 0644)
+    if err != nil {
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed to store data '%s': %+v", newPath, err)
+        return
+    }
+
+    if len(bestSplit.Entries) == 0 || len(bestSplit.Entries) != len(newSplit.Entries) {
+        // TODO Bad data
+        res.StatusCode = http.StatusInternalServerError
+        fmt.Printf("Failed to store data '%s': %+v", bestPath, err)
+        return
+    }
+
+    // TODO Store best per-split time
+
+    if idx := len(bestSplit.Entries) - 1; newSplit.Entries[idx].Time < bestSplit.Entries[idx].Time ||
+            bestSplit.Entries[idx].Time == 0 {
+        l := copy(bestSplit.Entries, newSplit.Entries)
+        if l != len(bestSplit.Entries) {
+            res.StatusCode = http.StatusInternalServerError
+            fmt.Printf("Failed to update local data: %+v", err)
+            return
+        }
+
+        data, err = json.Marshal(&bestSplit)
+        if err != nil {
+            res.StatusCode = http.StatusInternalServerError
+            fmt.Printf("Failed to format updated data: %+v", err)
+            return
+        }
+
+        bestFp.Seek(0, 0)
+        _, err = bestFp.Write(data)
+        if err != nil {
+            res.StatusCode = http.StatusInternalServerError
+            fmt.Printf("Failed to store updated data '%s': %+v", newPath, err)
+            return
+        }
+    }
+
+    res.StatusCode = http.StatusNotFound
 }
 
 func loadData(path string, res *http.Response, isJson bool) {
@@ -122,6 +207,10 @@ func Serve(conn net.Conn) {
         return
     }
 
+    if req.Body != nil {
+        defer req.Body.Close()
+    }
+
     res.Proto = req.Proto
     res.ProtoMajor = req.ProtoMajor
     res.ProtoMinor = req.ProtoMinor
@@ -143,19 +232,35 @@ func Serve(conn net.Conn) {
 
     switch req.Method {
     case "POST":
-        saveData(path, &res)
+        if isJson {
+            now := time.Now()
+            newPath := now.Format("2006-01-02T15:04:05") + ".json"
+            newPath = filepath.Join(path, newPath)
+            bestPath := filepath.Join(path, "best.json")
+            saveData(newPath, bestPath, req, &res)
+        } else {
+            res.StatusCode = http.StatusMethodNotAllowed
+            fmt.Printf("Cannot POST non-JSON data")
+            return
+        }
     case "GET":
         if isJson {
             path = filepath.Join(path, "best.json")
+            loadData(path, &res, isJson)
+        } else {
+            res.StatusCode = http.StatusMethodNotAllowed
+            fmt.Printf("Cannot GET non-JSON data")
+            return
         }
-        loadData(path, &res, isJson)
     case "OPTIONS":
-        fmt.Printf("Header: %+v\n", req.Header)
-        setCORS(req, &res)
+        // Allowed, but has empty response
     default:
         res.StatusCode = http.StatusMethodNotAllowed
         fmt.Printf("Invalid request method '%s'", req.Method)
+        return
     }
+
+    setCORS(req, &res)
 }
 
 func main() {

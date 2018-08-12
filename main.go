@@ -64,8 +64,8 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
     }
     if err != nil {
         res.StatusCode = http.StatusInternalServerError
-        fmt.Printf("Failed load split '%s': %+v", bestPath, err)
-        fmt.Printf("Data: %+v", data)
+        fmt.Printf("Failed to load split '%s': %+v", bestPath, err)
+        fmt.Printf("Data: %+s", string(data))
         return
     }
 
@@ -75,7 +75,6 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
         // TODO Failed to read body
         res.StatusCode = http.StatusInternalServerError
         fmt.Printf("Failed to get new data for '%s'", newPath, err)
-        fmt.Printf("Data: %+v", data)
         return
     }
 
@@ -83,7 +82,8 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
     if err != nil {
         // TODO Bad data
         res.StatusCode = http.StatusInternalServerError
-        fmt.Printf("Failed load split '%s': %+v", bestPath, err)
+        fmt.Printf("Failed to load split '%s': %+v", bestPath, err)
+        fmt.Printf("Data: %+s", string(data))
         return
     }
 

@@ -118,11 +118,20 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
             return
         }
 
+        // TODO If we succeded when writing to the file but fail to truncate its
+        // length, the JSON object may become corrupt!! Fix this!
         bestFp.Seek(0, 0)
         _, err = bestFp.Write(data)
         if err != nil {
             res.StatusCode = http.StatusMultiStatus
             fmt.Printf("Failed to store updated data '%s': %+v", newPath, err)
+            return
+        }
+        err = bestFp.Truncate(int64(len(data)))
+        if err != nil {
+            res.StatusCode = http.StatusMultiStatus
+            fmt.Printf("Failed fix updated data '%s': %+v", newPath, err)
+            fmt.Printf("WARNING: The file may have gotten corrupted!")
             return
         }
     }

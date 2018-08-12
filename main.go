@@ -95,8 +95,7 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
     }
 
     if len(bestSplit.Entries) == 0 || len(bestSplit.Entries) != len(newSplit.Entries) {
-        // TODO Bad data
-        res.StatusCode = http.StatusInternalServerError
+        res.StatusCode = http.StatusMultiStatus
         fmt.Printf("Failed to store data '%s': %+v", bestPath, err)
         return
     }
@@ -107,14 +106,14 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
             bestSplit.Entries[idx].Time == 0 {
         l := copy(bestSplit.Entries, newSplit.Entries)
         if l != len(bestSplit.Entries) {
-            res.StatusCode = http.StatusInternalServerError
+            res.StatusCode = http.StatusMultiStatus
             fmt.Printf("Failed to update local data: %+v", err)
             return
         }
 
         data, err = json.Marshal(&bestSplit)
         if err != nil {
-            res.StatusCode = http.StatusInternalServerError
+            res.StatusCode = http.StatusMultiStatus
             fmt.Printf("Failed to format updated data: %+v", err)
             return
         }
@@ -122,13 +121,13 @@ func saveData(newPath, bestPath string, req *http.Request, res *http.Response) {
         bestFp.Seek(0, 0)
         _, err = bestFp.Write(data)
         if err != nil {
-            res.StatusCode = http.StatusInternalServerError
+            res.StatusCode = http.StatusMultiStatus
             fmt.Printf("Failed to store updated data '%s': %+v", newPath, err)
             return
         }
     }
 
-    res.StatusCode = http.StatusNotFound
+    res.StatusCode = http.StatusAccepted
 }
 
 func loadData(path string, res *http.Response, isJson bool) {
@@ -199,16 +198,16 @@ func Serve(conn net.Conn) {
         return
     }
 
+    if req.Body != nil {
+        defer req.Body.Close()
+    }
+
     if !strings.HasPrefix(req.Proto, "HTTP/") {
         fmt.Printf("Received a non-HTTP request ('%s')\n", req.Proto)
         return
     } else if req.RequestURI == "" {
         fmt.Printf("Missing RequestURI in request\n")
         return
-    }
-
-    if req.Body != nil {
-        defer req.Body.Close()
     }
 
     res.Proto = req.Proto
@@ -282,7 +281,10 @@ func main() {
     if err != nil {
         panic(fmt.Sprintf("Failed to start listening on %s:%d: %+v", url, port , err))
     }
-    defer ctx.ln.Close()
+    defer func() {
+        ctx.ln.Close()
+        ctx.ln = nil
+    } ()
 
     ctx.running = true
     for ctx.running {
